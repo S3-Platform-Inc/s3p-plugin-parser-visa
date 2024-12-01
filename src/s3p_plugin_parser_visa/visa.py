@@ -1,6 +1,7 @@
 import datetime
 import time
 
+from s3p_sdk.exceptions.parser import S3PPluginParserFinish
 from s3p_sdk.plugin.payloads.parsers import S3PParserBase
 from s3p_sdk.types import S3PRefer, S3PDocument, S3PPlugin
 from selenium.common import NoSuchElementException
@@ -90,6 +91,8 @@ class VISA(S3PParserBase):
             document = S3PDocument(None, title, None, text, url, None, None, pub_date, datetime.datetime.now())
             self._find(document)
             # self._content_document.append(document)
+        except S3PPluginParserFinish as correct_error:
+            raise correct_error
         except Exception as e:
             self.logger.error(e)
 
@@ -142,6 +145,8 @@ class VISA(S3PParserBase):
             document = S3PDocument(None, title, None, text, url, None, None, pub_date, datetime.datetime.now())
             self._find(document)
             # self._content_document.append(document)
+        except S3PPluginParserFinish as correct_error:
+            raise correct_error
         except Exception as e:
             self.logger.error(e)
 
