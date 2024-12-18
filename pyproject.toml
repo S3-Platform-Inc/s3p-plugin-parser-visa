@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "s3-platform-plugin-template"
-version = "0.3.3"
+version = "0.3.4"
 description = "A repository that provides a pure template to make it easier to create a new plugin project"
 authors = ["CuberHuber, Roman Lupashko <lupashcko.rom@yandex.ru>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11"
-s3p-sdk = "^0.2.7"
+s3p-sdk = "0.2.8"
 python-dateutil = "^2.9.0.post0"
 
 

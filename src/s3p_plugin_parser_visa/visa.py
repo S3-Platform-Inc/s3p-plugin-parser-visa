@@ -1,9 +1,10 @@
 import datetime
 import time
 
-from s3p_sdk.exceptions.parser import S3PPluginParserFinish
+from s3p_sdk.exceptions.parser import S3PPluginParserFinish, S3PPluginParserOutOfRestrictionException
 from s3p_sdk.plugin.payloads.parsers import S3PParserBase
-from s3p_sdk.types import S3PRefer, S3PDocument, S3PPlugin
+from s3p_sdk.types import S3PRefer, S3PDocument, S3PPlugin, S3PPluginRestrictions
+from s3p_sdk.types.plugin_restrictions import FROM_DATE
 from selenium.common import NoSuchElementException
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
@@ -19,9 +20,8 @@ class VISA(S3PParserBase):
     """
     HOST = 'https://usa.visa.com'
 
-    def __init__(self, refer: S3PRefer, plugin: S3PPlugin, web_driver: WebDriver, max_count_documents: int = None,
-                 last_document: S3PDocument = None):
-        super().__init__(refer, plugin, max_count_documents, last_document)
+    def __init__(self, refer: S3PRefer, plugin: S3PPlugin, restrictions: S3PPluginRestrictions, web_driver: WebDriver):
+        super().__init__(refer, plugin, restrictions)
 
         # Тут должны быть инициализированы свойства, характерные для этого парсера. Например: WebDriver
         self._driver = web_driver
@@ -43,8 +43,17 @@ class VISA(S3PParserBase):
 
         blog_link = 'https://usa.visa.com/visa-everywhere/blog.html'
 
-        self._parsing_visa_press_release()
-        self._parsing_visa_archive()
+        try:
+            self._parsing_visa_press_release()
+        except S3PPluginParserOutOfRestrictionException as e:
+            if e.restriction == FROM_DATE:
+                self.logger.debug(f'Document is out of date range `{self._restriction.from_date}`')
+        try:
+            self._parsing_visa_archive()
+        except S3PPluginParserOutOfRestrictionException as e:
+            if e.restriction == FROM_DATE:
+                self.logger.debug(f'Document is out of date range `{self._restriction.from_date}`')
+                raise S3PPluginParserFinish(self._plugin, f'Document is out of date range `{self._restriction.from_date}`', e)
         # ---
         # ========================================
 
@@ -55,27 +64,19 @@ class VISA(S3PParserBase):
         self._initial_access_source(press_release_link, 4)
 
         tabs = self._driver.find_elements(By.CLASS_NAME, 'tab-pane')
-        print(len(tabs))
 
         links = []
 
         for tab in tabs:
             articles = tab.find_elements(By.TAG_NAME, "a")
-            dates = tab.find_elements(By.TAG_NAME, "p")
-
-            for a, d in zip(articles, dates):
-                print(d.text, a.text, a.get_attribute('href'))
+            # dates = tab.find_elements(By.TAG_NAME, "p")
 
             for article in articles:
                 link = article.get_attribute('href')
                 if link:
                     links.append(link)
 
-        for index, link in enumerate(links):
-            # Ограничение парсинга до установленного параметра self.max_count_documents
-            # if index >= self.max_count_documents:
-            #     self.logger.debug('Max count press-release reached')
-            #     break
+        for link in links:
             self._parse_press_release_page(link)
 
     def _parse_press_release_page(self, url: str):
@@ -93,6 +94,10 @@ class VISA(S3PParserBase):
             # self._content_document.append(document)
         except S3PPluginParserFinish as correct_error:
             raise correct_error
+        except S3PPluginParserOutOfRestrictionException as e:
+            # Document is out of date range, continue to next material.
+            # You can also use a restriction exception to skip irrelevant materials later on.
+            raise e
         except Exception as e:
             self.logger.error(e)
 
@@ -106,10 +111,8 @@ class VISA(S3PParserBase):
         links = []
 
         tabs = self._driver.find_elements(By.CLASS_NAME, 'vs-accordion-content')
-        print(len(tabs))
         for tab in tabs:
             sections = tab.find_elements(By.CLASS_NAME, 'section')
-            print(len(sections))
 
             for section in sections:
                 article = section.find_element(By.TAG_NAME, 'a')
@@ -125,13 +128,7 @@ class VISA(S3PParserBase):
                 # Вот это нужно поменять, если мы захотим скачивать файлы тоже.
                 if link and link.endswith('.html'):
                     links.append((link, pub_date))
-        print(len(links))
-        print(links)
         for index, (link, pub_date) in enumerate(links):
-            # Ограничение парсинга до установленного параметра self.max_count_documents
-            # if index >= self.max_count_documents:
-            #     self.logger.debug('Max count archive reached')
-            #     break
             self._parse_archive_page(link, pub_date)
 
     def _parse_archive_page(self, url: str, pub_date: datetime.datetime):
@@ -147,6 +144,10 @@ class VISA(S3PParserBase):
             # self._content_document.append(document)
         except S3PPluginParserFinish as correct_error:
             raise correct_error
+        except S3PPluginParserOutOfRestrictionException as e:
+            # Document is out of date range, continue to next material.
+            # You can also use a restriction exception to skip irrelevant materials later on.
+            raise e
         except Exception as e:
             self.logger.error(e)
 
@@ -160,12 +161,18 @@ class VISA(S3PParserBase):
         """
         Метод прожимает кнопку agree на модальном окне
         """
-        cookie_agree_xpath = '//*[@id="onetrust-accept-btn-handler"]'
+        cookies = (
+            (By.CSS_SELECTOR, '#CookieReportsBanner > div.wscrBannerContent > div.wscrBannerContentInner > a.wscrOk'),
+            (By.XPATH, '//*[@id="onetrust-accept-btn-handler"]')
+        )
 
-        try:
-            cookie_button = self._driver.find_element(By.XPATH, cookie_agree_xpath)
-            if WebDriverWait(self._driver, 5).until(ec.element_to_be_clickable(cookie_button)):
-                cookie_button.click()
-                self.logger.debug(F"Parser pass cookie modal on page: {self._driver.current_url}")
-        except NoSuchElementException as e:
-            self.logger.debug(f'modal agree not found on page: {self._driver.current_url}')
+        for cookie in cookies:
+            try:
+                cookie_button = self._driver.find_element(cookie[0], cookie[1])
+                if WebDriverWait(self._driver, 5).until(ec.element_to_be_clickable(cookie_button)):
+                    cookie_button.click()
+                    self.logger.debug(F"Parser pass cookie modal on page: {self._driver.current_url}")
+                    break
+            except NoSuchElementException as e:
+                self.logger.debug(f'modal agree not found on page: {self._driver.current_url}')
+
