@@ -37,8 +37,7 @@ config = PluginConfig(
     middleware=MiddlewareConfig(
         modules=[
             modules.TimezoneSafeControlConfig(order=1, is_critical=True),
-            modules.FilterOnlyNewDocumentWithDB(order=2, is_critical=True),
-            modules.SaveDocument(order=3, is_critical=True),
+            modules.SaveOnlyNewDocuments(order=2, is_critical=True),
         ],
         bus=None,
     ),
